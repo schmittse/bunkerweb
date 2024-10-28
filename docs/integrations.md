@@ -1155,7 +1155,10 @@ spec:
                   number: 8000
 ```
 
-### Minikube specificities
+
+### Specificities
+
+#### Minikube
 
 We are aware of issues with Minikube and internal hostname resolution. To work around this, there is a specific setting that you can use in the `bunkerweb-controller` deployment :
 
@@ -1188,6 +1191,42 @@ spec:
             ...
 ...
 ```
+
+#### Custom cluster domain
+
+For admins that have customized the cluster internal domain (defaults to `cluster.local`), you can modify the setting in the `bunkerweb-controller` deployment :
+
+```yaml
+...
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bunkerweb-controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bunkerweb-controller
+  template:
+    metadata:
+      labels:
+        app: bunkerweb-controller
+    spec:
+      serviceAccountName: sa-bunkerweb
+      containers:
+        - name: bunkerweb-controller
+          image: bunkerity/bunkerweb-autoconf:1.6.0-beta
+          imagePullPolicy: Always
+          env:
+            - name: KUBERNETES_CLUSTER_DOMAIN
+              value: "custom.domain" # Replace cluster.local suffix in internal resolution
+            ...
+...
+```
+
+Use the special value `-` to remove the domain usage in internal resolution.
 
 
 ## Swarm

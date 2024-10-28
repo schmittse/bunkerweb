@@ -27,6 +27,22 @@ class IngressController(Controller):
         self.__use_fqdn = getenv("USE_KUBERNETES_FQDN", "yes").lower() == "yes"
         self.__ingress_class = getenv("KUBERNETES_INGRESS_CLASS", "")
         self._logger.info(f"Using Pod {'FQDN' if self.__use_fqdn else 'IP'} as hostname")
+        self.__cluster_domain = getenv("KUBERNETES_CLUSTER_DOMAIN", "cluster.local")
+        self._logger.info(f"Using cluster domain {self.__cluster_domain}")
+        self.__controller_name = "bunkerweb.io/controller"
+        self.__ingress_class_names = []
+
+    def _update_settings(self):
+        super()._update_settings()
+        # Load IngressClass form k8s
+        self.__ingress_class_names.clear()
+        for ingressClass in self.__networkingv1.list_ingress_class(watch=False).items:
+            # FIXME Handle default IngressClass
+            if self.__controller_name == ingressClass.spec.controller:
+                self.__ingress_class_names.append(ingressClass.name)
+        if self.__ingress_class_names.count() == 0:
+            # Add default value for now
+            self.__ingress_class_names.append("bunkerweb")
 
     def _get_controller_instances(self) -> list:
         instances = []
@@ -124,7 +140,7 @@ class IngressController(Controller):
                     self._logger.warning(f"Ignoring ingress rule with service {path.backend.service.name} : service not found.")
                     continue
 
-                reverse_proxy_host = f"http://{path.backend.service.name}.{namespace}.svc.cluster.local"
+                reverse_proxy_host = f"http://{path.backend.service.name}.{namespace}.svc{'' if self.__cluster_domain == '-' else '.' + self.__cluster_domain}"
                 if path.backend.service.port.number != 80:
                     reverse_proxy_host += f":{path.backend.service.port.number}"
 
