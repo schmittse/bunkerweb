@@ -25,24 +25,21 @@ class IngressController(Controller):
         self.__corev1 = client.CoreV1Api()
         self.__networkingv1 = client.NetworkingV1Api()
         self.__use_fqdn = getenv("USE_KUBERNETES_FQDN", "yes").lower() == "yes"
-        self.__ingress_class = getenv("KUBERNETES_INGRESS_CLASS", "")
         self._logger.info(f"Using Pod {'FQDN' if self.__use_fqdn else 'IP'} as hostname")
         self.__cluster_domain = getenv("KUBERNETES_CLUSTER_DOMAIN", "cluster.local")
         self._logger.info(f"Using cluster domain {self.__cluster_domain}")
-        self.__controller_name = "bunkerweb.io/controller"
+        self.__controller_name = getenv("KUBERNETES_CONTROLLER", "bunkerweb.io/ingress-controller")
         self.__ingress_class_names = []
+        self._load_ingress_classes()
 
-    def _update_settings(self):
-        super()._update_settings()
+    def _load_ingress_classes(self):
         # Load IngressClass form k8s
         self.__ingress_class_names.clear()
         for ingressClass in self.__networkingv1.list_ingress_class(watch=False).items:
             # FIXME Handle default IngressClass
             if self.__controller_name == ingressClass.spec.controller:
-                self.__ingress_class_names.append(ingressClass.name)
-        if self.__ingress_class_names.count() == 0:
-            # Add default value for now
-            self.__ingress_class_names.append("bunkerweb")
+                self.__ingress_class_names.append(ingressClass.metadata.name)
+        self._logger.info(f"Loaded IngressClass : {self.__ingress_class_names}")
 
     def _get_controller_instances(self) -> list:
         instances = []
@@ -234,22 +231,31 @@ class IngressController(Controller):
             return False
 
         annotations = metadata.annotations if metadata else None
-        data = getattr(obj, "data", None) if obj else None
         if not obj:
             return False
         if obj.kind == "Pod":
             return annotations and "bunkerweb.io/INSTANCE" in annotations
+        if obj.kind == "IngressClass":
+            # Look for controller
+            spec = getattr(obj, "spec", None) if obj else None
+            ctrl = getattr(spec, "controller", None) if spec else None
+            # Check if controller match this instance
+            return ctrl and self.__controller_name == ctrl
         if obj.kind == "Ingress":
-            if self.__ingress_class:
-                ingress_class_name = getattr(obj.spec, "ingressClassName", None)
-                if not ingress_class_name or ingress_class_name != self.__ingress_class:
-                    return False
-            return True
+            # Look for ingressClass
+            spec = getattr(obj, "spec", None) if obj else None
+            icn = getattr(spec, "ingressClassName", None) if spec else None
+            if icn is None and annotations:
+                icn = annotations.get("kubernetes.io/ingress.class", None)
+            # FIXME Handle default IngressClass
+            # Check if ingressClass is supported by this controller
+            return icn and icn in self.__ingress_class_names
         if obj.kind == "ConfigMap":
             return annotations and "bunkerweb.io/CONFIG_TYPE" in annotations
         if obj.kind == "Service":
             return True
         if obj.kind == "Secret":
+            data = getattr(obj, "data", None) if obj else None
             return data and "tls.crt" in data and "tls.key" in data
         return False
 
@@ -258,6 +264,8 @@ class IngressController(Controller):
         what = None
         if watch_type == "pod":
             what = self.__corev1.list_pod_for_all_namespaces
+        elif watch_type == "ingressclass":
+            what = self.__networkingv1.list_ingress_class
         elif watch_type == "ingress":
             what = self.__networkingv1.list_ingress_for_all_namespaces
         elif watch_type == "configmap":
@@ -287,6 +295,8 @@ class IngressController(Controller):
                     while not applied:
                         waiting = self.have_to_wait()
                         self._update_settings()
+                        if watch_type == "ingressclass":
+                            self._load_ingress_classes()
                         self._instances = self.get_instances()
                         self._services = self.get_services()
                         self._configs = self.get_configs()
@@ -346,7 +356,7 @@ class IngressController(Controller):
 
     def process_events(self):
         self._set_autoconf_load_db()
-        watch_types = ("pod", "ingress", "configmap", "service", "secret")
+        watch_types = ("pod", "ingressclass", "ingress", "configmap", "service", "secret")
         threads = [Thread(target=self.__watch, args=(watch_type,)) for watch_type in watch_types]
         for thread in threads:
             thread.start()

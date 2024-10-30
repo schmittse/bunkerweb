@@ -763,7 +763,7 @@ rules:
     resources: ["services", "pods", "configmaps", "secrets"]
     verbs: ["get", "watch", "list"]
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
+    resources: ["ingresses", "ingressesclasses"]
     verbs: ["get", "watch", "list"]
 ---
 apiVersion: v1
@@ -1155,6 +1155,66 @@ spec:
                   number: 8000
 ```
 
+#### Customizing controller
+
+You can change the controller name in the `bunkerweb-controller` deployment in order to define more `IngressClass` :
+
+```yaml
+...
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bunkerweb-controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bunkerweb-controller
+  template:
+    metadata:
+      labels:
+        app: bunkerweb-controller
+    spec:
+      serviceAccountName: sa-bunkerweb
+      containers:
+        - name: bunkerweb-controller
+          image: bunkerity/bunkerweb-autoconf:1.6.0-beta
+          imagePullPolicy: Always
+          env:
+            - name: KUBERNETES_CONTROLLER
+              value: "bunkerweb.io/ingress-controller-custom" # Deploy a new controller
+            ...
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: bunkerweb-custom
+spec:
+  controller: bunkerweb.io/ingress-controller-custom
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ingress-custom
+  annotations:
+    bunkerweb.io/MY_SETTING: "value"
+    bunkerweb.io/www.example.com_MY_SETTING: "value"
+spec:
+  ingressClassName: bunkerweb-custom
+  rules:
+    - host: www.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: svc-my-app
+                port:
+                  number: 8000
+```
 
 ### Specificities
 
