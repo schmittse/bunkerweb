@@ -793,6 +793,26 @@ metadata:
 spec:
   controller: bunkerweb.io/ingress-controller
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bunkerweb-config
+data:
+  KUBERNETES_MODE: "yes"
+  # replace with your DNS resolvers
+  # e.g. : kube-dns.kube-system.svc.cluster.local
+  DNS_RESOLVERS: "coredns.kube-system.svc.cluster.local"
+  # 10.0.0.0/8 is the cluster internal subnet
+  API_WHITELIST_IP: "127.0.0.0/8 10.0.0.0/8"
+  # Remember to set a stronger password for the database
+  DATABASE_URI: "mariadb+pymysql://bunkerweb:changeme@svc-bunkerweb-db:3306/db"
+  BUNKERWEB_INSTANCES: "" # We don't need to specify the BunkerWeb instance here as they are automatically detected by the ingress controller
+  SERVER_NAME: "" # The server name will be filled with services annotations
+  MULTISITE: "yes" # Mandatory setting for autoconf
+  USE_REDIS: "yes"
+  REDIS_HOST: "svc-bunkerweb-redis.default.svc.cluster.local"
+  # Add other global settings
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -827,16 +847,9 @@ spec:
               hostPort: 80
             - containerPort: 8443
               hostPort: 443
-          env:
-            - name: KUBERNETES_MODE
-              value: "yes"
-            # replace with your DNS resolvers
-            # e.g. : kube-dns.kube-system.svc.cluster.local
-            - name: DNS_RESOLVERS
-              value: "coredns.kube-system.svc.cluster.local"
-            # 10.0.0.0/8 is the cluster internal subnet
-            - name: API_WHITELIST_IP
-              value: "127.0.0.0/8 10.0.0.0/8"
+          envFrom:
+            - configMapRef:
+                name: bunkerweb-config
           livenessProbe:
             exec:
               command:
@@ -875,11 +888,9 @@ spec:
         - name: bunkerweb-controller
           image: bunkerity/bunkerweb-autoconf:1.6.0-beta
           imagePullPolicy: Always
-          env:
-            - name: KUBERNETES_MODE
-              value: "yes"
-            - name: DATABASE_URI
-              value: "mariadb+pymysql://bunkerweb:changeme@svc-bunkerweb-db:3306/db" # Remember to set a stronger password for the database
+          envFrom:
+            - configMapRef:
+                name: bunkerweb-config
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -902,28 +913,9 @@ spec:
         - name: bunkerweb-scheduler
           image: bunkerity/bunkerweb-scheduler:1.6.0-beta
           imagePullPolicy: Always
-          env:
-            - name: KUBERNETES_MODE
-              value: "yes"
-            - name: DATABASE_URI
-              value: "mariadb+pymysql://bunkerweb:changeme@svc-bunkerweb-db:3306/db" # Remember to set a stronger password for the database
-            # replace with your DNS resolvers
-            # e.g. : kube-dns.kube-system.svc.cluster.local
-            - name: DNS_RESOLVERS
-              value: "coredns.kube-system.svc.cluster.local"
-            # 10.0.0.0/8 is the cluster internal subnet
-            - name: API_WHITELIST_IP
-              value: "127.0.0.0/8 10.0.0.0/8"
-            - name: BUNKERWEB_INSTANCES
-              value: "" # We don't need to specify the BunkerWeb instance here as they are automatically detected by the ingress controller
-            - name: SERVER_NAME
-              value: "" # The server name will be filled with services annotations
-            - name: MULTISITE
-              value: "yes" # Mandatory setting for autoconf
-            - name: USE_REDIS
-              value: "yes"
-            - name: REDIS_HOST
-              value: "svc-bunkerweb-redis.default.svc.cluster.local"
+          envFrom:
+            - configMapRef:
+                name: bunkerweb-config
 ---
 apiVersion: apps/v1
 kind: Deployment
